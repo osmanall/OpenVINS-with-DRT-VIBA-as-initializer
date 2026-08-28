@@ -93,16 +93,16 @@ namespace DRT {
                     ++parallax_num;
                 }
             }
-                        // VINS already keyframe-selected these; keep every frame for a 1:1 mapping , Newo
-            insert_image_frame = true;
-/* old_o
+            
+                         // OpenVINS feeds raw 20 Hz frames with no keyframe selection. VINS
+            // pre-selected by parallax, which is the input DRT expects.
+            double parallax_avg = (parallax_num > 0) ? parallax_sum / parallax_num : 0.0;
+            const double MIN_PARALLAX = 10.0 / 460.0;   // VINS: keyframe_parallax / FOCAL_LENGTH
             if (std::abs(frame_id - last_image_t_ns) >= 0.22) {
-                insert_image_frame = true;
-            } else
-            {
+                insert_image_frame = (parallax_avg >= MIN_PARALLAX);
+            } else {
                 insert_image_frame = false;
             }
-*/
         }
 
         if (insert_image_frame) {
@@ -445,6 +445,32 @@ namespace DRT {
     }
     
     // NEWo
+        // Soft prior pulling KF0's biases toward DRT-l's values, so the optimizer
+    // cannot use them to absorb visual/IMU mismatch. Same sigmas as OpenVINS
+    // (DynamicInitializer.cpp:697). The IMU factors' bias random-walk terms
+    // carry the constraint to the remaining keyframes.
+    class BiasPriorFactor : public ceres::SizedCostFunction<6, 9> {
+    public:
+        BiasPriorFactor(const Eigen::Vector3d &bg0, const Eigen::Vector3d &ba0, double sig_g, double sig_a)
+            : bg0_(bg0), ba0_(ba0), wg_(1.0 / sig_g), wa_(1.0 / sig_a) {}
+        bool Evaluate(double const *const *p, double *res, double **jac) const override {
+            Eigen::Map<const Eigen::Vector3d> bg(p[0] + 3);
+            Eigen::Map<const Eigen::Vector3d> ba(p[0] + 6);
+            Eigen::Map<Eigen::Matrix<double, 6, 1>> r(res);
+            r.head<3>() = wg_ * (bg - bg0_);
+            r.tail<3>() = wa_ * (ba - ba0_);
+            if (jac && jac[0]) {
+                Eigen::Map<Eigen::Matrix<double, 6, 9, Eigen::RowMajor>> J(jac[0]);
+                J.setZero();
+                J.block<3, 3>(0, 3) = wg_ * Eigen::Matrix3d::Identity();
+                J.block<3, 3>(3, 6) = wa_ * Eigen::Matrix3d::Identity();
+            }
+            return true;
+        }
+    private:
+        Eigen::Vector3d bg0_, ba0_;
+        double wg_, wa_;
+    };
     bool drtVioInit::structurelessVIBA() {
            /* {   // ===== TEMP: manual manifold gradient check (delete after PASS) =====
     std::array<double,6> xi{}, xj{};
@@ -518,8 +544,8 @@ namespace DRT {
         problem.AddParameterBlock(pose[i].data(), 6, new PoseLocalParameterization());
         problem.AddParameterBlock(speed_bias[i].data(), 9);
     }
-    problem.SetParameterBlockConstant(pose[0].data());   // fix gauge on KF0
-
+   // problem.SetParameterBlockConstant(pose[0].data());   // fix gauge on KF0
+    problem.AddResidualBlock(new BiasPriorFactor(biasg, biasa, 0.05, 0.10), nullptr, speed_bias[0].data());
     for (int i = 0; i < N - 1; ++i) {
         auto* imu_factor = new vio::ImuIntegFactor(&imu_meas[i]);
         problem.AddResidualBlock(imu_factor, nullptr,
@@ -528,7 +554,7 @@ namespace DRT {
     }
         // ===== epipolar visual factors over co-visible keyframe pairs =====
     ceres::LossFunction* vis_loss = new ceres::HuberLoss(1.0);
-    const double vis_weight = 20.0;   // = Σ_C^{-1/2}; the IMU-vs-vision balance knob (tune)
+    const double vis_weight = vis_weight_;   // = Σ_C^{-1/2}; the IMU-vs-vision balance knob (tune)
     int n_epi = 0;
     for (const auto& kv : SFMConstruct) {
         const auto& obs = kv.second.obs;
@@ -557,7 +583,42 @@ namespace DRT {
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
     std::cout << "[VI-BA imu-only] " << summary.BriefReport() << std::endl;
-
+        // Recover the covariance of the newest keyframe from the VI-BA problem.
+    // Order is DRT's tangent space: [dphi(3), dp_body(3), dv(3), dbg(3), dba(3)].
+    cov_last_.resize(0, 0);
+    {
+        double *p_last = pose[N - 1].data();
+        double *s_last = speed_bias[N - 1].data();
+        ceres::Covariance::Options copt;
+        copt.algorithm_type = ceres::DENSE_SVD;
+        copt.apply_loss_function = true;
+        copt.null_space_rank = 4;              // 4 unobservable dof: position + yaw
+        copt.min_reciprocal_condition_number = 1e-14;
+        ceres::Covariance cov(copt);
+        std::vector<std::pair<const double *, const double *>> blocks;
+        blocks.emplace_back(p_last, p_last);
+        blocks.emplace_back(s_last, s_last);
+        blocks.emplace_back(p_last, s_last);
+        if (cov.Compute(blocks, &problem)) {
+            Eigen::Matrix<double, 6, 6, Eigen::RowMajor> Cpp;
+            Eigen::Matrix<double, 9, 9, Eigen::RowMajor> Css;
+            Eigen::Matrix<double, 6, 9, Eigen::RowMajor> Cps;
+            cov.GetCovarianceBlockInTangentSpace(p_last, p_last, Cpp.data());
+            cov.GetCovarianceBlockInTangentSpace(s_last, s_last, Css.data());
+            cov.GetCovarianceBlockInTangentSpace(p_last, s_last, Cps.data());
+            cov_last_ = Eigen::MatrixXd::Zero(15, 15);
+            cov_last_.block<6, 6>(0, 0) = Cpp;
+            cov_last_.block<9, 9>(6, 6) = Css;
+            cov_last_.block<6, 9>(0, 6) = Cps;
+            cov_last_.block<9, 6>(6, 0) = Cps.transpose();
+            cov_last_ = 0.5 * (cov_last_ + cov_last_.transpose());
+            std::cout << "[VIBA-cov] sigma ori=" << std::sqrt(cov_last_(0,0)) * 180.0 / M_PI
+                      << " deg, vel=" << std::sqrt(cov_last_(6,6))
+                      << ", ba=" << std::sqrt(cov_last_(12,12)) << std::endl;
+        } else {
+            std::cout << "[VIBA-cov] recovery FAILED" << std::endl;
+        }
+    }
     // write refined states back (still in the aligned frame; un-align follows below)
     for (int i = 0; i < N; ++i) {
         Eigen::Vector3d w = Eigen::Map<const Eigen::Vector3d>(pose[i].data());

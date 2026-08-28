@@ -75,6 +75,8 @@ namespace DRT {
         Eigen::Vector3d biasg;
         Eigen::Vector3d biasa;
         Eigen::Vector3d gravity;
+        double vis_weight_ = 20.0;
+        Eigen::MatrixXd cov_last_;   // 15x15 covariance of the last keyframe, empty if recovery failed
         double avg_observation;
         std::vector<Eigen::Vector3d> velocity;
         std::vector<Eigen::Vector3d> position;
