@@ -37,6 +37,7 @@ namespace ov_init {
 
 class StaticInitializer;
 class DynamicInitializer;
+class DrtInitializer;
 
 /**
  * @brief Initializer for visual-inertial system.
@@ -112,6 +113,9 @@ protected:
 
   /// Dynamic initialization helper class
   std::shared_ptr<DynamicInitializer> init_dynamic;
+
+    /// DRT + VI-BA initialization helper class
+  std::shared_ptr<DrtInitializer> init_drt;
 };
 
 } // namespace ov_init

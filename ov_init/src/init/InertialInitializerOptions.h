@@ -75,6 +75,8 @@ struct InertialInitializerOptions {
   /// If we should perform dynamic initialization
   bool init_dyn_use = false;
 
+  bool init_dyn_use_drt = false;
+  double init_drt_vis_weight = 20.0;
   /// If we should optimize and recover the calibration in our MLE
   bool init_dyn_mle_opt_calib = false;
 
@@ -129,6 +131,8 @@ struct InertialInitializerOptions {
       parser->parse_config("init_max_disparity", init_max_disparity);
       parser->parse_config("init_max_features", init_max_features);
       parser->parse_config("init_dyn_use", init_dyn_use);
+      parser->parse_config("init_dyn_use_drt", init_dyn_use_drt, false);
+      parser->parse_config("init_drt_vis_weight", init_drt_vis_weight, false);
       parser->parse_config("init_dyn_mle_opt_calib", init_dyn_mle_opt_calib);
       parser->parse_config("init_dyn_mle_max_iter", init_dyn_mle_max_iter);
       parser->parse_config("init_dyn_mle_max_threads", init_dyn_mle_max_threads);
@@ -169,6 +173,8 @@ struct InertialInitializerOptions {
       std::exit(EXIT_FAILURE);
     }
     PRINT_DEBUG("  - init_dyn_use: %d\n", init_dyn_use);
+    PRINT_DEBUG("  - init_dyn_use_drt: %d\n", init_dyn_use_drt);
+    PRINT_DEBUG("  - init_drt_vis_weight: %.1f\n", init_drt_vis_weight);
     PRINT_DEBUG("  - init_dyn_mle_opt_calib: %d\n", init_dyn_mle_opt_calib);
     PRINT_DEBUG("  - init_dyn_mle_max_iter: %d\n", init_dyn_mle_max_iter);
     PRINT_DEBUG("  - init_dyn_mle_max_threads: %d\n", init_dyn_mle_max_threads);

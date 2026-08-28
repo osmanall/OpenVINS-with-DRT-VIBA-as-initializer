@@ -32,7 +32,7 @@
 #include "utils/print.h"
 #include "utils/quat_ops.h"
 #include "utils/sensor_data.h"
-
+#include "drt/DrtInitializer.h"
 using namespace ov_core;
 using namespace ov_type;
 using namespace ov_init;
@@ -47,6 +47,7 @@ InertialInitializer::InertialInitializer(InertialInitializerOptions &params_, st
   init_static = std::make_shared<StaticInitializer>(params, _db, imu_data);
 #ifndef __ANDROID__
   init_dynamic = std::make_shared<DynamicInitializer>(params, _db, imu_data);
+  init_drt = std::make_shared<DrtInitializer>(params, _db, imu_data);
 #else
   init_dynamic = nullptr;
 #endif
@@ -144,6 +145,9 @@ bool InertialInitializer::initialize(double &timestamp, Eigen::MatrixXd &covaria
     std::map<double, std::shared_ptr<ov_type::PoseJPL>> _clones_IMU;
     std::unordered_map<size_t, std::shared_ptr<ov_type::Landmark>> _features_SLAM;
     if (init_dynamic) {
+      if (params.init_dyn_use_drt) {
+        return init_drt->initialize(timestamp, covariance, order, t_imu, _clones_IMU, _features_SLAM);
+      }
       return init_dynamic->initialize(timestamp, covariance, order, t_imu, _clones_IMU, _features_SLAM);
     }
 #else

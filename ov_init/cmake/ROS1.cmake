@@ -55,6 +55,7 @@ if (NOT catkin_FOUND OR NOT ENABLE_ROS)
     )
 
 endif ()
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/drt/core)
 
 ##################################################
 # Make the shared library
@@ -68,6 +69,14 @@ list(APPEND LIBRARY_SOURCES
         src/ceres/State_JPLQuatLocal.cpp
         src/init/InertialInitializer.cpp
         src/dynamic/DynamicInitializer.cpp
+        src/drt/DrtInitializer.cpp
+        src/drt/core/initMethod/drtVioInit.cpp
+        src/drt/core/initMethod/drtLooselyCoupled.cpp
+        src/drt/core/initMethod/polynomial.cc
+        src/drt/core/factor/imuIntegFactor.cc
+        src/drt/core/IMU/basicTypes.cpp
+        src/drt/core/IMU/imuPreintegrated.cpp
+        src/drt/core/drt_glue.cpp
         src/static/StaticInitializer.cpp
         src/sim/SimulatorInit.cpp
 )
